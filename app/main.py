@@ -174,6 +174,121 @@ def fingerprint_distance(a: List[float], b: List[float]) -> float:
     return math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b))) / math.sqrt(8)
 
 
+# ── Bayesian Drift Detector ──────────────────────────────────────────────────
+
+class BayesianDriftDetector:
+    """
+    Per-agent, per-dimension Bayesian Normal-Normal conjugate prior drift detection.
+    Replaces Z-score approach with principled uncertainty-aware drift thresholds.
+    """
+
+    DEFAULT_MU = 0.5
+    DEFAULT_VAR = 0.1
+
+    def __init__(self):
+        # {agent: {dim_name: {mu0, sigma0_sq, n, sum_x, sum_x_sq}}}
+        self.priors: Dict[str, Dict[str, Dict]] = {}
+
+    def _get_state(self, agent: str, dim: str) -> Dict:
+        if agent not in self.priors:
+            self.priors[agent] = {}
+        if dim not in self.priors[agent]:
+            self.priors[agent][dim] = {
+                "mu0": self.DEFAULT_MU,
+                "sigma0_sq": self.DEFAULT_VAR,
+                "n": 0,
+                "sum_x": 0.0,
+                "sum_x_sq": 0.0,
+            }
+        return self.priors[agent][dim]
+
+    def seed_from_history(self, agent: str, dim: str, values: List[float]):
+        """Initialize prior from a list of historical observations."""
+        if not values:
+            return
+        s = self._get_state(agent, dim)
+        mu = sum(values) / len(values)
+        var = (
+            sum((x - mu) ** 2 for x in values) / len(values)
+            if len(values) > 1
+            else self.DEFAULT_VAR
+        )
+        s["mu0"] = mu
+        s["sigma0_sq"] = max(var, 0.001)
+        s["n"] = len(values)
+        s["sum_x"] = sum(values)
+        s["sum_x_sq"] = sum(x ** 2 for x in values)
+
+    def update(self, agent: str, dim: str, value: float):
+        """Incorporate a new observation into the running sufficient statistics."""
+        s = self._get_state(agent, dim)
+        s["n"] += 1
+        s["sum_x"] += value
+        s["sum_x_sq"] += value ** 2
+
+    def get_posterior(self, agent: str, dim: str):
+        """Return (posterior_mean, posterior_variance)."""
+        s = self._get_state(agent, dim)
+        n = s["n"]
+        if n == 0:
+            return s["mu0"], s["sigma0_sq"]
+        obs_var = max(s["sum_x_sq"] / n - (s["sum_x"] / n) ** 2, 0.01)
+        posterior_var = 1.0 / (1.0 / s["sigma0_sq"] + n / obs_var)
+        posterior_mean = posterior_var * (
+            s["mu0"] / s["sigma0_sq"] + s["sum_x"] / obs_var
+        )
+        return posterior_mean, posterior_var
+
+    def is_drifting(self, agent: str, dim: str, value: float) -> bool:
+        n = self._get_state(agent, dim)["n"]
+        k = 3.0 if n < 10 else (2.5 if n < 50 else 2.0)
+        mean, var = self.get_posterior(agent, dim)
+        return abs(value - mean) > k * (var ** 0.5)
+
+    def drift_score(self, agent: str, fingerprint: List[float]) -> float:
+        """
+        Compute an aggregate 0-1 drift score from an 8-dim fingerprint.
+        Fraction of dimensions where is_drifting == True, weighted by deviation magnitude.
+        """
+        dims = [
+            "avg_sent_len", "vocab_div", "hedge_ratio", "question_ratio",
+            "list_usage", "code_usage", "length_bucket", "formality",
+        ]
+        if not fingerprint or len(fingerprint) != len(dims):
+            return 0.0
+
+        deviations = []
+        for i, dim in enumerate(dims):
+            mean, var = self.get_posterior(agent, dim)
+            std = max(var ** 0.5, 1e-6)
+            deviations.append(abs(fingerprint[i] - mean) / std)
+
+        # Normalize: z-scores > 3 → full drift; mean of normalized scores → 0-1
+        avg_z = sum(min(d / 3.0, 1.0) for d in deviations) / len(deviations)
+        return min(avg_z, 1.0)
+
+    def update_fingerprint(self, agent: str, fingerprint: List[float]):
+        """Update all 8 dimensions from a fingerprint vector."""
+        dims = [
+            "avg_sent_len", "vocab_div", "hedge_ratio", "question_ratio",
+            "list_usage", "code_usage", "length_bucket", "formality",
+        ]
+        for i, dim in enumerate(dims):
+            if i < len(fingerprint):
+                self.update(agent, dim, fingerprint[i])
+
+    def calibration_confidence(self, agent: str) -> str:
+        dims = self.priors.get(agent, {})
+        if not dims:
+            return "low"
+        avg_n = sum(d["n"] for d in dims.values()) / len(dims)
+        return "high" if avg_n >= 50 else ("medium" if avg_n >= 10 else "low")
+
+
+# Global Bayesian detector instance
+bayes_detector = BayesianDriftDetector()
+
+
 def compute_cost(model: str, tokens_in: int, tokens_out: int) -> float:
     in_rate, out_rate = MODEL_COSTS.get(model.lower(), MODEL_COSTS["default"])
     return (tokens_in / 1000 * in_rate) + (tokens_out / 1000 * out_rate)
@@ -273,20 +388,22 @@ async def ingest(event: IngestEvent):
     hallucination = detect_hallucination(event.output_text or "")
     cost = compute_cost(event.model, event.tokens_in, event.tokens_out)
     
-    # Fingerprint & drift
+    # Fingerprint & Bayesian drift
     agent = get_or_create_agent(event.agent_id)
     fingerprint = compute_fingerprint(event.output_text or "")
-    
+
     if agent["fingerprint_baseline"] is None and len(fingerprint) > 0:
         agent["fingerprint_baseline"] = fingerprint
-    
+
     agent["fingerprint_current"] = fingerprint
-    drift = fingerprint_distance(
-        agent["fingerprint_baseline"] or fingerprint,
-        fingerprint
-    )
+
+    # Bayesian drift score (replaces raw fingerprint_distance threshold)
+    drift = bayes_detector.drift_score(event.agent_id, fingerprint)
+    # Update posterior with this new observation
+    bayes_detector.update_fingerprint(event.agent_id, fingerprint)
+
     agent["fingerprint_drift"] = drift
-    
+
     if drift < 0.15:
         drift_status = "nominal"
     elif drift < 0.30:
@@ -436,6 +553,7 @@ async def get_agents():
         
         out.append({
             "id": agent_id,
+            "name": agent_id,
             "first_seen": a["first_seen"],
             "last_seen": a["last_seen"],
             "call_count": a["call_count"],
@@ -452,6 +570,7 @@ async def get_agents():
             "confidence_sparkline": conf_history[-10:],
             "models_used": dict(a["models_used"]),
             "cost_history": cost_history[-10:],
+            "calibration_confidence": bayes_detector.calibration_confidence(agent_id),
         })
     
     # Include known agents that haven't been seen yet
@@ -459,6 +578,7 @@ async def get_agents():
         if agent_id not in agent_state:
             out.append({
                 "id": agent_id,
+                "name": agent_id,
                 "call_count": 0,
                 "error_count": 0,
                 "error_rate": 0,
@@ -469,6 +589,7 @@ async def get_agents():
                 "drift_status": "nominal",
                 "fingerprint_drift": 0,
                 "status": "never_seen",
+                "calibration_confidence": bayes_detector.calibration_confidence(agent_id),
             })
     
     return out
@@ -567,50 +688,88 @@ async def websocket_endpoint(websocket: WebSocket):
         active_connections.discard(websocket)
 
 
-# ── Demo data seed ─────────────────────────────────────────────────────────────
+# ── Seed from epistemic DB data ───────────────────────────────────────────────
 
-async def seed_demo_data():
-    """Seed realistic demo data so the dashboard looks alive on first load."""
-    await asyncio.sleep(2)  # Wait for server to be ready
-    
-    demo_agents = ["watson", "adlan", "content-scott", "argus", "dispatch"]
-    demo_models = ["claude-sonnet-4-6", "claude-haiku-3-5", "claude-sonnet-4-5"]
-    demo_outputs = [
-        "I've analyzed the request and found 3 key insights: 1) The data shows a 23% improvement in efficiency. 2) Cost reduction is achievable through optimization. 3) Timeline estimate is approximately 2 weeks.",
-        "Based on my research, the company was founded by Sarah Chen in 2019 and recently announced their Series B funding. Their headquarters is located at 123 Main Street.",
-        "The task has been completed successfully. All files were processed and the results stored in Firestore. No errors encountered during execution.",
-        "I'm not entirely sure about this, but I think the best approach might be to use a microservices architecture. Perhaps we could consider a monolith first though.",
-        "According to recent studies, AI adoption in enterprises has grown by 150% last year. Scientists found that companies implementing AI see 3x ROI on average.",
-        "Here's the deployment plan:\n- Step 1: Build Docker image\n- Step 2: Push to GCR\n- Step 3: Deploy to Cloud Run\n- Step 4: Verify health endpoint",
-        "The analysis is complete. Memory coherence score is 0.87, indicating strong consistency with prior context. No drift detected.",
-    ]
-    
-    now = datetime.now(timezone.utc)
-    
-    for i in range(40):
-        agent = random.choice(demo_agents)
-        model = random.choice(demo_models)
-        ts = (now - timedelta(minutes=random.randint(0, 1440))).isoformat()
-        
-        event = IngestEvent(
-            agent_id=agent,
-            session_id=f"session-{random.randint(1, 10):03d}",
-            model=model,
-            tokens_in=random.randint(200, 3000),
-            tokens_out=random.randint(100, 1500),
-            latency_ms=random.randint(500, 5000),
-            output_text=random.choice(demo_outputs),
-            timestamp=ts,
-            error=random.random() < 0.05,
-        )
-        await ingest(event)
-    
-    print("✅ Demo data seeded")
+SEED_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "seed.json")
+
+FINGERPRINT_DIMS = [
+    "avg_sent_len", "vocab_div", "hedge_ratio", "question_ratio",
+    "list_usage", "code_usage", "length_bucket", "formality",
+]
+
+
+async def load_seed_data():
+    """
+    Load data/seed.json and:
+    1. Initialize Bayesian priors from historical fingerprints.
+    2. Ingest events so the dashboard shows real call history.
+    """
+    await asyncio.sleep(1)
+
+    if not os.path.exists(SEED_PATH):
+        print(f"⚠️  Seed file not found at {SEED_PATH}, skipping seed load")
+        return
+
+    try:
+        with open(SEED_PATH) as f:
+            seed_events = json.load(f)
+    except Exception as e:
+        print(f"⚠️  Failed to load seed.json: {e}")
+        return
+
+    print(f"📂 Loading {len(seed_events)} seed events from epistemic DB...")
+
+    # Phase 1: build Bayesian priors from all fingerprints (no ingestion yet)
+    per_agent_fingerprints: Dict[str, List[List[float]]] = {}
+    for ev in seed_events:
+        agent = ev.get("agent", "watson")
+        fp = compute_fingerprint(ev.get("output", ""))
+        if agent not in per_agent_fingerprints:
+            per_agent_fingerprints[agent] = []
+        per_agent_fingerprints[agent].append(fp)
+
+    for agent, fingerprints in per_agent_fingerprints.items():
+        for dim_idx, dim_name in enumerate(FINGERPRINT_DIMS):
+            values = [fp[dim_idx] for fp in fingerprints if len(fp) > dim_idx]
+            bayes_detector.seed_from_history(agent, dim_name, values)
+
+    print(f"✅ Bayesian priors seeded for {len(per_agent_fingerprints)} agents")
+
+    # Phase 2: ingest a subset (up to 40 most recent per agent) to populate dashboard
+    by_agent: Dict[str, list] = {}
+    for ev in seed_events:
+        a = ev.get("agent", "watson")
+        by_agent.setdefault(a, []).append(ev)
+
+    ingested = 0
+    for agent, evs in by_agent.items():
+        # Most recent first (seed.json is newest-first from DB query)
+        for ev in evs[:40]:
+            event = IngestEvent(
+                agent_id=ev.get("agent", "watson"),
+                session_id=f"seed-{agent}",
+                model=ev.get("model", "claude-sonnet-4-6"),
+                tokens_in=ev.get("tokens_in", 500),
+                tokens_out=ev.get("tokens_out", 150),
+                latency_ms=ev.get("latency_ms", 1500),
+                output_text=ev.get("output", "")[:500],
+                timestamp=ev.get("timestamp"),
+                error=False,
+            )
+            await ingest(event)
+            ingested += 1
+
+    print(f"✅ Ingested {ingested} seed events. Dashboard ready.")
+
+    # Log calibration confidence per agent
+    for agent in per_agent_fingerprints:
+        conf = bayes_detector.calibration_confidence(agent)
+        print(f"   {agent}: calibration_confidence={conf}")
 
 
 @app.on_event("startup")
 async def startup_event():
-    asyncio.create_task(seed_demo_data())
+    asyncio.create_task(load_seed_data())
 
 
 if __name__ == "__main__":
