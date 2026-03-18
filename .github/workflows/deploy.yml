@@ -30,14 +30,14 @@ jobs:
       - name: Configure Docker for GCR
         run: gcloud auth configure-docker --quiet
 
-      - name: Build Docker image
+      - name: Build and Push via Cloud Build
         run: |
-          docker build -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
-
-      - name: Push Docker image
-        run: |
-          docker push $IMAGE:${{ github.sha }}
-          docker push $IMAGE:latest
+          gcloud builds submit . \
+            --tag $IMAGE:${{ github.sha }} \
+            --project $PROJECT_ID \
+            --quiet
+          
+          gcloud container images add-tag $IMAGE:${{ github.sha }} $IMAGE:latest --quiet
 
       - name: Deploy to Cloud Run
         run: |
@@ -52,7 +52,6 @@ jobs:
             --cpu 1 \
             --port 8080 \
             --timeout 300 \
-            --set-env-vars "GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-sa-key.json" \
             --quiet
 
       - name: Get Service URL
