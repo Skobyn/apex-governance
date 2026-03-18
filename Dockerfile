@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy app
 COPY app/ ./
 COPY frontend/ ./frontend/
+COPY data/ ./data/
 
 # Cloud Run expects port 8080
 ENV PORT=8080
