@@ -1,0 +1,1369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Watson Governance Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    :root {
+      --bg: #0a0f1a;
+      --bg2: #0d1425;
+      --panel: #1B2A4A;
+      --panel2: #1e3055;
+      --accent: #00f5a0;
+      --accent2: #00c87d;
+      --accent3: #0095ff;
+      --warn: #f5a623;
+      --danger: #ff4757;
+      --text: #e0eaff;
+      --text2: #8ba0c0;
+      --border: #2a3f6a;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ─── SCANLINE EFFECT ─────────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,245,160,0.015) 2px,
+        rgba(0,245,160,0.015) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* ─── TOP BAR ──────────────────────────────────────────────── */
+    #topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      height: 58px;
+      background: rgba(27,42,74,0.9);
+      border-bottom: 1px solid rgba(0,245,160,0.2);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent), 0 0 24px var(--accent);
+      animation: pulse-dot 2s infinite;
+    }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.85); }
+    }
+
+    .brand-title {
+      font-size: 17px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--text);
+    }
+
+    .brand-title span { color: var(--accent); }
+
+    .topbar-meta {
+      display: flex;
+      gap: 24px;
+      align-items: center;
+    }
+
+    .topbar-stat {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1px;
+    }
+
+    .topbar-stat .val {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--accent);
+      font-family: 'JetBrains Mono', monospace;
+      line-height: 1;
+    }
+
+    .topbar-stat .lbl {
+      font-size: 10px;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .conn-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text2);
+    }
+
+    .conn-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent);
+    }
+    .conn-dot.disconnected { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+
+    /* ─── GRID LAYOUT ──────────────────────────────────────────── */
+    #main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 16px;
+      padding: 16px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    /* ─── PANEL ────────────────────────────────────────────────── */
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 18px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .panel::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: 0.5;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .panel-title {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .panel-title .icon { font-size: 14px; }
+
+    .panel-badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 20px;
+      background: rgba(0,245,160,0.1);
+      color: var(--accent);
+      border: 1px solid rgba(0,245,160,0.2);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* ─── NETWORK GRAPH ────────────────────────────────────────── */
+    #network-panel {
+      grid-column: 1 / 3;
+      min-height: 380px;
+    }
+
+    #network-svg {
+      width: 100%;
+      height: 320px;
+      display: block;
+    }
+
+    /* ─── LIVE FEED ────────────────────────────────────────────── */
+    #feed-panel {
+      grid-column: 3;
+      grid-row: 1 / 3;
+      min-height: 600px;
+    }
+
+    #call-feed {
+      height: 520px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    #call-feed::-webkit-scrollbar { width: 4px; }
+    #call-feed::-webkit-scrollbar-track { background: transparent; }
+    #call-feed::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .call-item {
+      background: rgba(13,20,37,0.8);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      animation: slide-in 0.3s ease;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+
+    .call-item:hover { border-color: rgba(0,245,160,0.4); }
+
+    @keyframes slide-in {
+      from { transform: translateX(20px); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    .call-item-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+
+    .call-agent {
+      font-weight: 600;
+      color: var(--accent);
+      font-size: 12px;
+    }
+
+    .call-model {
+      font-size: 10px;
+      color: var(--text2);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .call-meta {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .call-tag {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .tag-tokens { background: rgba(0,149,255,0.15); color: #6bc5ff; }
+    .tag-latency { background: rgba(245,166,35,0.15); color: #f5c842; }
+    .tag-conf { background: rgba(0,245,160,0.12); color: var(--accent); }
+    .tag-risk-low { background: rgba(0,245,160,0.1); color: var(--accent2); }
+    .tag-risk-medium { background: rgba(245,166,35,0.12); color: var(--warn); }
+    .tag-risk-high { background: rgba(255,71,87,0.12); color: var(--danger); }
+    .tag-cost { background: rgba(150,100,255,0.12); color: #b89aff; }
+    .tag-anomaly { background: rgba(255,71,87,0.2); color: var(--danger); border: 1px solid var(--danger); animation: blink 1s infinite; }
+
+    @keyframes blink { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
+
+    /* ─── AGENT HEALTH GRID ────────────────────────────────────── */
+    #agents-panel {
+      grid-column: 1;
+      grid-row: 2;
+    }
+
+    .agent-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(42,63,106,0.5);
+    }
+    .agent-row:last-child { border-bottom: none; }
+
+    .agent-status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .status-nominal { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+    .status-warning { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+    .status-critical { background: var(--danger); box-shadow: 0 0 6px var(--danger); animation: blink 1s infinite; }
+    .status-offline { background: #3a4a6a; }
+
+    .agent-name {
+      font-weight: 600;
+      font-size: 12px;
+      flex: 1;
+      color: var(--text);
+    }
+
+    .agent-stats {
+      display: flex;
+      gap: 8px;
+      font-size: 10px;
+      color: var(--text2);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .sparkline {
+      width: 60px;
+      height: 20px;
+    }
+
+    /* ─── COST CONSOLE ─────────────────────────────────────────── */
+    #costs-panel {
+      grid-column: 2;
+      grid-row: 2;
+    }
+
+    .cost-total {
+      font-size: 36px;
+      font-weight: 900;
+      color: var(--accent);
+      font-family: 'JetBrains Mono', monospace;
+      line-height: 1;
+      margin-bottom: 4px;
+    }
+
+    .cost-label { font-size: 11px; color: var(--text2); margin-bottom: 14px; }
+
+    .burn-gauge {
+      width: 100%;
+      height: 6px;
+      background: var(--bg2);
+      border-radius: 3px;
+      margin: 10px 0;
+      overflow: hidden;
+    }
+
+    .burn-gauge-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: linear-gradient(90deg, var(--accent2), var(--warn), var(--danger));
+      transition: width 0.5s ease;
+    }
+
+    .cost-breakdown {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-top: 12px;
+    }
+
+    .cost-bar-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+    }
+
+    .cost-bar-label {
+      width: 80px;
+      color: var(--text2);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .cost-bar-track {
+      flex: 1;
+      height: 4px;
+      background: var(--bg2);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .cost-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      border-radius: 2px;
+      transition: width 0.5s ease;
+    }
+
+    .cost-bar-val {
+      width: 50px;
+      text-align: right;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text);
+    }
+
+    /* ─── HALLUCINATION HEATMAP ────────────────────────────────── */
+    #heatmap-panel {
+      grid-column: 1 / 3;
+    }
+
+    #heatmap-container {
+      overflow-x: auto;
+    }
+
+    #heatmap-grid {
+      display: grid;
+      gap: 3px;
+    }
+
+    .heatmap-cell {
+      width: 28px; height: 28px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 8px;
+      color: transparent;
+      transition: background-color 0.5s ease;
+      cursor: pointer;
+      position: relative;
+    }
+
+    .heatmap-cell:hover::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: 110%;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--panel2);
+      color: var(--text);
+      padding: 4px 8px;
+      border-radius: 6px;
+      font-size: 10px;
+      white-space: nowrap;
+      border: 1px solid var(--border);
+      z-index: 10;
+    }
+
+    /* ─── DRIFT FINGERPRINT ────────────────────────────────────── */
+    #drift-panel {
+      grid-column: 3;
+    }
+
+    .fingerprint-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(42,63,106,0.5);
+    }
+    .fingerprint-row:last-child { border-bottom: none; }
+
+    .fp-name { width: 80px; font-size: 11px; color: var(--text2); }
+
+    .fp-radar {
+      width: 50px; height: 50px;
+      flex-shrink: 0;
+    }
+
+    .fp-drift {
+      flex: 1;
+    }
+
+    .fp-drift-bar {
+      height: 4px;
+      background: var(--bg2);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-bottom: 3px;
+    }
+
+    .fp-drift-fill {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.5s ease;
+    }
+    .drift-nominal { background: var(--accent); }
+    .drift-warning { background: var(--warn); }
+    .drift-critical { background: var(--danger); animation: blink 1s infinite; }
+
+    .fp-drift-label { font-size: 10px; color: var(--text2); }
+
+    /* ─── PROVENANCE MODAL ─────────────────────────────────────── */
+    #modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(5,10,20,0.85);
+      z-index: 200;
+      backdrop-filter: blur(8px);
+    }
+    #modal-overlay.open { display: flex; align-items: center; justify-content: center; }
+
+    #modal {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      max-width: 640px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+      position: relative;
+    }
+
+    #modal-close {
+      position: absolute;
+      top: 16px; right: 16px;
+      background: none;
+      border: none;
+      color: var(--text2);
+      font-size: 20px;
+      cursor: pointer;
+      padding: 4px 8px;
+    }
+    #modal-close:hover { color: var(--text); }
+
+    #modal-title { font-size: 16px; font-weight: 700; margin-bottom: 20px; }
+
+    .provenance-section { margin-bottom: 16px; }
+    .prov-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent); margin-bottom: 6px; }
+    .prov-content {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text2);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .score-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .score-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+
+    .score-val { font-size: 24px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+    .score-lbl { font-size: 10px; color: var(--text2); margin-top: 4px; }
+
+    /* ─── CHART CONTAINERS ─────────────────────────────────────── */
+    .chart-wrap {
+      width: 100%;
+      height: 140px;
+      position: relative;
+    }
+
+    /* ─── RESPONSIVE ───────────────────────────────────────────── */
+    @media (max-width: 1024px) {
+      #main-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+      #network-panel { grid-column: 1 / 3; }
+      #feed-panel { grid-column: 1 / 3; grid-row: auto; }
+      #heatmap-panel { grid-column: 1 / 3; }
+    }
+
+    @media (max-width: 640px) {
+      #main-grid { grid-template-columns: 1fr; }
+      #network-panel, #feed-panel, #heatmap-panel, #drift-panel { grid-column: 1; }
+    }
+
+    /* ─── ANIMATED TICKER ──────────────────────────────────────── */
+    .new-call-flash {
+      animation: call-flash 0.8s ease;
+    }
+
+    @keyframes call-flash {
+      0% { box-shadow: 0 0 0 0 rgba(0,245,160,0.4); border-color: var(--accent); }
+      100% { box-shadow: 0 0 0 8px rgba(0,245,160,0); border-color: var(--border); }
+    }
+
+    /* ─── GLOW EFFECTS ─────────────────────────────────────────── */
+    .glow-green { text-shadow: 0 0 10px rgba(0,245,160,0.5); }
+    .glow-box { box-shadow: 0 0 20px rgba(0,245,160,0.08), inset 0 1px 0 rgba(0,245,160,0.05); }
+
+    /* D3 graph styles */
+    .node circle {
+      stroke-width: 2;
+      cursor: pointer;
+      transition: r 0.2s;
+    }
+    .node text {
+      font-size: 10px;
+      fill: var(--text);
+      font-family: 'Inter', sans-serif;
+      pointer-events: none;
+    }
+    .link {
+      stroke: var(--border);
+      stroke-width: 1.5;
+      fill: none;
+    }
+    .link.active {
+      stroke: var(--accent);
+      stroke-width: 2.5;
+    }
+    .link-pulse {
+      stroke: var(--accent);
+      stroke-width: 3;
+      fill: none;
+      opacity: 0;
+    }
+  </style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div id="topbar">
+  <div class="brand">
+    <div class="brand-dot"></div>
+    <div class="brand-title"><span>Watson</span> Governance Center</div>
+  </div>
+  <div class="topbar-meta">
+    <div class="topbar-stat">
+      <div class="val" id="stat-calls">0</div>
+      <div class="lbl">Total Calls</div>
+    </div>
+    <div class="topbar-stat">
+      <div class="val" id="stat-agents">0</div>
+      <div class="lbl">Active Agents</div>
+    </div>
+    <div class="topbar-stat">
+      <div class="val" id="stat-cost">$0.000</div>
+      <div class="lbl">Total Spend</div>
+    </div>
+    <div class="topbar-stat">
+      <div class="val" id="stat-burn">$0.00/hr</div>
+      <div class="lbl">Burn Rate</div>
+    </div>
+    <div class="conn-indicator">
+      <div class="conn-dot" id="ws-dot"></div>
+      <span id="ws-label">Connecting…</span>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN GRID -->
+<div id="main-grid">
+
+  <!-- NETWORK GRAPH -->
+  <div class="panel glow-box" id="network-panel">
+    <div class="panel-header">
+      <div class="panel-title"><span class="icon">🕸</span> Agent Network</div>
+      <div class="panel-badge" id="network-badge">0 edges active</div>
+    </div>
+    <svg id="network-svg"></svg>
+  </div>
+
+  <!-- LIVE CALL FEED -->
+  <div class="panel glow-box" id="feed-panel">
+    <div class="panel-header">
+      <div class="panel-title"><span class="icon">⚡</span> Live Call Feed</div>
+      <div class="panel-badge" id="feed-badge">0 calls</div>
+    </div>
+    <div id="call-feed"></div>
+  </div>
+
+  <!-- AGENT HEALTH -->
+  <div class="panel glow-box" id="agents-panel">
+    <div class="panel-header">
+      <div class="panel-title"><span class="icon">🤖</span> Agent Health</div>
+    </div>
+    <div id="agent-list"></div>
+  </div>
+
+  <!-- COST CONSOLE -->
+  <div class="panel glow-box" id="costs-panel">
+    <div class="panel-header">
+      <div class="panel-title"><span class="icon">💸</span> Cost Burn Console</div>
+    </div>
+    <div class="cost-total glow-green" id="cost-total">$0.0000</div>
+    <div class="cost-label">Total accumulated spend</div>
+    <div style="display:flex; justify-content:space-between; font-size:11px; color:var(--text2); margin-bottom:4px;">
+      <span>Burn rate</span>
+      <span id="burn-rate-label">$0.00/hr</span>
+    </div>
+    <div class="burn-gauge">
+      <div class="burn-gauge-fill" id="burn-gauge-fill" style="width:0%"></div>
+    </div>
+    <div class="cost-breakdown" id="cost-breakdown"></div>
+  </div>
+
+  <!-- HALLUCINATION HEATMAP -->
+  <div class="panel glow-box" id="heatmap-panel">
+    <div class="panel-header">
+      <div class="panel-title"><span class="icon">🔥</span> Hallucination Heatmap · 24hr</div>
+      <div class="panel-badge" id="heatmap-badge">Rolling window</div>
+    </div>
+    <div id="heatmap-container">
+      <div id="heatmap-grid"></div>
+    </div>
+    <div style="margin-top:10px;">
+      <div class="chart-wrap">
+        <canvas id="hall-type-chart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- DRIFT FINGERPRINT -->
+  <div class="panel glow-box" id="drift-panel">
+    <div class="panel-header">
+      <div class="panel-title"><span class="icon">🧬</span> Agent DNA Fingerprints</div>
+    </div>
+    <div id="drift-list"></div>
+  </div>
+
+</div>
+
+<!-- PROVENANCE MODAL -->
+<div id="modal-overlay">
+  <div id="modal">
+    <button id="modal-close" onclick="closeModal()">✕</button>
+    <div id="modal-title">Call Provenance</div>
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<script>
+// ── CONFIG ──────────────────────────────────────────────────────────────────
+const BASE_URL = window.location.origin;
+const WS_URL = (window.location.protocol === 'https:' ? 'wss:' : 'ws:') +
+               '//' + window.location.host + '/api/live';
+
+// ── STATE ───────────────────────────────────────────────────────────────────
+let agents = {};
+let calls = [];
+let ws = null;
+let hallTypeChart = null;
+let networkSim = null;
+let wsReconnectTimer = null;
+let activeEdges = {};  // edge-key → timeout
+
+const KNOWN_AGENTS = ['watson','adlan','argus','dispatch','content-scott','content-apex','felix-browser','felix-build'];
+const AGENT_COLORS = {
+  'watson':       '#00f5a0',
+  'adlan':        '#0095ff',
+  'argus':        '#f5a623',
+  'dispatch':     '#b89aff',
+  'content-scott':'#ff6b9d',
+  'content-apex': '#00d4ff',
+  'felix-browser':'#ff8c42',
+  'felix-build':  '#48cfad',
+};
+
+function agentColor(id) {
+  return AGENT_COLORS[id] || '#6bc5ff';
+}
+
+// ── WEBSOCKET ────────────────────────────────────────────────────────────────
+function connectWS() {
+  if (ws) { try { ws.close(); } catch(e) {} }
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    document.getElementById('ws-dot').classList.remove('disconnected');
+    document.getElementById('ws-label').textContent = 'Live';
+    if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+  };
+
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'call') handleNewCall(msg.data);
+    else if (msg.type === 'agent_update') handleAgentUpdate(msg.data);
+    else if (msg.type === 'init') handleInit(msg.data);
+  };
+
+  ws.onclose = () => {
+    document.getElementById('ws-dot').classList.add('disconnected');
+    document.getElementById('ws-label').textContent = 'Reconnecting…';
+    wsReconnectTimer = setTimeout(connectWS, 3000);
+  };
+
+  ws.onerror = () => ws.close();
+}
+
+// Keepalive
+setInterval(() => {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping');
+}, 25000);
+
+// ── INIT HANDLER ─────────────────────────────────────────────────────────────
+function handleInit(data) {
+  (data.recent_calls || []).forEach(c => {
+    calls.unshift(c);
+    if (c.agent_id) ensureAgent(c.agent_id, c);
+  });
+  calls = calls.slice(0, 200);
+  renderAllCalls();
+  renderAgentList();
+  renderNetworkGraph();
+  fetchAndRenderAll();
+}
+
+// ── CALL HANDLER ─────────────────────────────────────────────────────────────
+function handleNewCall(call) {
+  calls.unshift(call);
+  calls = calls.slice(0, 200);
+  ensureAgent(call.agent_id, call);
+  
+  prependCallCard(call);
+  updateTopStats();
+  pulseNetworkEdge(call.agent_id, 'watson');
+  renderAgentList();
+  
+  const feedBadge = document.getElementById('feed-badge');
+  feedBadge.textContent = calls.length + ' calls';
+}
+
+function handleAgentUpdate(data) {
+  if (agents[data.id]) {
+    Object.assign(agents[data.id], data);
+  } else {
+    agents[data.id] = data;
+  }
+  updateTopStats();
+}
+
+// ── AGENT HELPERS ─────────────────────────────────────────────────────────────
+function ensureAgent(id, call) {
+  if (!agents[id]) {
+    agents[id] = {
+      id,
+      call_count: 0,
+      error_count: 0,
+      total_cost: 0,
+      avg_confidence: 0,
+      avg_hallucination: 0,
+      drift_status: 'nominal',
+      fingerprint_drift: 0,
+      last_seen: call.timestamp,
+      confidence_sparkline: [],
+    };
+  }
+  const a = agents[id];
+  a.call_count++;
+  if (call.error) a.error_count++;
+  a.total_cost = (a.total_cost || 0) + (call.cost || 0);
+  a.last_seen = call.timestamp;
+  
+  // Update sparkline
+  if (!a.confidence_sparkline) a.confidence_sparkline = [];
+  a.confidence_sparkline.push(call.confidence || 0);
+  if (a.confidence_sparkline.length > 10) a.confidence_sparkline.shift();
+  
+  if (call.drift_status) a.drift_status = call.drift_status;
+  if (call.fingerprint_drift !== undefined) a.fingerprint_drift = call.fingerprint_drift;
+}
+
+// ── TOP STATS ─────────────────────────────────────────────────────────────────
+function updateTopStats() {
+  const total = Object.values(agents).reduce((s, a) => s + (a.call_count||0), 0);
+  const active = Object.keys(agents).length;
+  const cost = Object.values(agents).reduce((s, a) => s + (a.total_cost||0), 0);
+  
+  document.getElementById('stat-calls').textContent = total.toLocaleString();
+  document.getElementById('stat-agents').textContent = active;
+  document.getElementById('stat-cost').textContent = '$' + cost.toFixed(4);
+}
+
+// ── CALL CARD ─────────────────────────────────────────────────────────────────
+function prependCallCard(call) {
+  const feed = document.getElementById('call-feed');
+  const el = makeCallCard(call);
+  el.classList.add('new-call-flash');
+  feed.insertBefore(el, feed.firstChild);
+  
+  // Keep max 50 items in DOM
+  while (feed.children.length > 50) feed.removeChild(feed.lastChild);
+}
+
+function renderAllCalls() {
+  const feed = document.getElementById('call-feed');
+  feed.innerHTML = '';
+  calls.slice(0, 50).forEach(c => feed.appendChild(makeCallCard(c)));
+  document.getElementById('feed-badge').textContent = calls.length + ' calls';
+}
+
+function makeCallCard(call) {
+  const div = document.createElement('div');
+  div.className = 'call-item';
+  
+  const risk = call.hallucination_risk || 'low';
+  const riskClass = risk === 'high' ? 'tag-risk-high' : risk === 'medium' ? 'tag-risk-medium' : 'tag-risk-low';
+  const costStr = call.cost ? '$' + call.cost.toFixed(5) : '$0.00000';
+  const confStr = call.confidence !== undefined ? (call.confidence * 100).toFixed(0) + '%' : '--';
+  const tokens = (call.tokens_in || 0) + (call.tokens_out || 0);
+  
+  div.innerHTML = `
+    <div class="call-item-header">
+      <span class="call-agent">${call.agent_id || 'unknown'}</span>
+      <span class="call-model">${(call.model || '').replace('claude-', '').replace('gpt-', '')}</span>
+    </div>
+    <div class="call-meta">
+      <span class="call-tag tag-tokens">↑${call.tokens_in||0} ↓${call.tokens_out||0}</span>
+      <span class="call-tag tag-latency">${call.latency_ms||0}ms</span>
+      <span class="call-tag tag-conf">conf ${confStr}</span>
+      <span class="call-tag ${riskClass}">hall ${risk}</span>
+      <span class="call-tag tag-cost">${costStr}</span>
+      ${call.cost_anomaly ? '<span class="call-tag tag-anomaly">⚠ SPIKE</span>' : ''}
+    </div>
+  `;
+  
+  div.addEventListener('click', () => openModal(call));
+  return div;
+}
+
+// ── PROVENANCE MODAL ──────────────────────────────────────────────────────────
+function openModal(call) {
+  document.getElementById('modal-title').textContent =
+    `📋 Call: ${call.agent_id} · ${call.call_id || 'unknown'}`;
+  
+  const dna = (call.fingerprint || []).map(v => v.toFixed(3)).join(', ');
+  
+  document.getElementById('modal-content').innerHTML = `
+    <div class="score-grid" style="margin-bottom:16px;">
+      <div class="score-box">
+        <div class="score-val" style="color:var(--accent)">${((call.confidence||0)*100).toFixed(1)}%</div>
+        <div class="score-lbl">Confidence</div>
+      </div>
+      <div class="score-box">
+        <div class="score-val" style="color:${call.hallucination_risk==='high'?'var(--danger)':call.hallucination_risk==='medium'?'var(--warn)':'var(--accent)'}">
+          ${((call.hallucination_score||0)*100).toFixed(1)}%
+        </div>
+        <div class="score-lbl">Hallucination Risk (${call.hallucination_type||'none'})</div>
+      </div>
+      <div class="score-box">
+        <div class="score-val" style="color:var(--accent3)">${((call.drift||0)*100).toFixed(1)}%</div>
+        <div class="score-lbl">Drift Delta</div>
+      </div>
+      <div class="score-box">
+        <div class="score-val" style="color:#b89aff">$${(call.cost||0).toFixed(5)}</div>
+        <div class="score-lbl">Cost${call.cost_anomaly?' ⚠ ANOMALY':''}</div>
+      </div>
+    </div>
+    ${call.input_text ? `<div class="provenance-section">
+      <div class="prov-label">Input (truncated)</div>
+      <div class="prov-content">${escHtml(call.input_text)}</div>
+    </div>` : ''}
+    <div class="provenance-section">
+      <div class="prov-label">Output</div>
+      <div class="prov-content">${escHtml((call.output_text||'').substring(0,500))}</div>
+    </div>
+    <div class="provenance-section">
+      <div class="prov-label">DNA Fingerprint (8-dim)</div>
+      <div class="prov-content">[${dna}]\n\nDimensions: sentence_len · vocab_div · hedge_ratio · question_ratio · list_usage · code_usage · length · formality</div>
+    </div>
+    <div class="provenance-section">
+      <div class="prov-label">Metadata</div>
+      <div class="prov-content">agent: ${call.agent_id}
+session: ${call.session_id || 'n/a'}
+model: ${call.model}
+tokens: ${call.tokens_in}in / ${call.tokens_out}out
+latency: ${call.latency_ms}ms
+timestamp: ${call.timestamp}
+drift_status: ${call.drift_status || 'nominal'}
+error: ${call.error ? 'YES' : 'no'}</div>
+    </div>
+  `;
+  
+  document.getElementById('modal-overlay').classList.add('open');
+}
+
+function closeModal() {
+  document.getElementById('modal-overlay').classList.remove('open');
+}
+
+document.getElementById('modal-overlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('modal-overlay')) closeModal();
+});
+
+function escHtml(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// ── AGENT LIST ────────────────────────────────────────────────────────────────
+function renderAgentList() {
+  const list = document.getElementById('agent-list');
+  const allAgents = [...new Set([...KNOWN_AGENTS, ...Object.keys(agents)])];
+  
+  list.innerHTML = allAgents.map(id => {
+    const a = agents[id] || {};
+    const status = a.call_count ? (a.drift_status || 'nominal') : 'offline';
+    const calls = a.call_count || 0;
+    const lastSeen = a.last_seen ? timeAgo(a.last_seen) : 'never';
+    const conf = a.avg_confidence ? (a.avg_confidence * 100).toFixed(0) + '%' : '--';
+    const sparkline = (a.confidence_sparkline || []).join(',');
+    
+    return `
+      <div class="agent-row">
+        <div class="agent-status-dot status-${status}"></div>
+        <div class="agent-name">${id}</div>
+        <div class="agent-stats">
+          <span>${calls}c</span>
+          <span>${conf}</span>
+          <span>${lastSeen}</span>
+        </div>
+        ${sparkline ? `<svg class="sparkline" viewBox="0 0 60 20" preserveAspectRatio="none">
+          ${makeSparklinePath(a.confidence_sparkline||[])}
+        </svg>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+function makeSparklinePath(vals) {
+  if (vals.length < 2) return '';
+  const max = 1, min = 0;
+  const w = 60, h = 20;
+  const points = vals.map((v, i) => {
+    const x = (i / (vals.length - 1)) * w;
+    const y = h - ((v - min) / (max - min)) * h;
+    return `${x},${y}`;
+  });
+  return `<polyline points="${points.join(' ')}" fill="none" stroke="#00f5a0" stroke-width="1.5" opacity="0.7"/>`;
+}
+
+function timeAgo(ts) {
+  try {
+    const diff = (Date.now() - new Date(ts).getTime()) / 1000;
+    if (diff < 60) return Math.round(diff) + 's';
+    if (diff < 3600) return Math.round(diff/60) + 'm';
+    return Math.round(diff/3600) + 'h';
+  } catch(e) { return '?'; }
+}
+
+// ── COST CONSOLE ──────────────────────────────────────────────────────────────
+function renderCosts(data) {
+  if (!data) return;
+  
+  document.getElementById('cost-total').textContent = '$' + (data.total||0).toFixed(4);
+  document.getElementById('stat-cost').textContent = '$' + (data.total||0).toFixed(4);
+  
+  const burnHr = data.burn_rate_per_hour || 0;
+  document.getElementById('burn-rate-label').textContent = '$' + burnHr.toFixed(4) + '/hr';
+  document.getElementById('stat-burn').textContent = '$' + burnHr.toFixed(4) + '/hr';
+  
+  // Gauge: assume $1/day max for gauge full
+  const gaugeMax = 1 / 24;
+  const pct = Math.min((burnHr / gaugeMax) * 100, 100);
+  document.getElementById('burn-gauge-fill').style.width = pct + '%';
+  
+  const breakdown = document.getElementById('cost-breakdown');
+  const byAgent = data.by_agent || {};
+  const entries = Object.entries(byAgent).sort((a,b) => b[1].total - a[1].total).slice(0, 8);
+  const maxCost = entries.length ? Math.max(...entries.map(e => e[1].total)) : 1;
+  
+  breakdown.innerHTML = entries.map(([agentId, info]) => {
+    const pct = maxCost > 0 ? (info.total / maxCost) * 100 : 0;
+    return `
+      <div class="cost-bar-row">
+        <div class="cost-bar-label">${agentId}</div>
+        <div class="cost-bar-track">
+          <div class="cost-bar-fill" style="width:${pct}%; background:${agentColor(agentId)}"></div>
+        </div>
+        <div class="cost-bar-val">$${(info.total||0).toFixed(4)}</div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ── HEATMAP ────────────────────────────────────────────────────────────────────
+function renderHeatmap(heatmapData, typeData) {
+  const grid = document.getElementById('heatmap-grid');
+  const agentIds = Object.keys(heatmapData);
+  if (!agentIds.length) {
+    grid.innerHTML = '<div style="color:var(--text2);font-size:12px;padding:8px;">No data yet — ingest events to populate</div>';
+    return;
+  }
+  
+  const hours = Array.from({length: 24}, (_, i) => i);
+  
+  // Build grid: rows = agents, cols = hours
+  const cols = hours.length + 1;
+  grid.style.gridTemplateColumns = `80px repeat(${hours.length}, 28px)`;
+  
+  let html = '<div style="color:transparent">.</div>';
+  hours.forEach(h => {
+    html += `<div style="text-align:center;font-size:9px;color:var(--text2);padding-bottom:2px;">${h}</div>`;
+  });
+  
+  agentIds.slice(0, 6).forEach(agentId => {
+    html += `<div style="font-size:10px;color:var(--text2);display:flex;align-items:center;height:28px;">${agentId.slice(0,8)}</div>`;
+    hours.forEach(h => {
+      const val = (heatmapData[agentId] || {})[String(h)] || 0;
+      const r = Math.round(val * 255);
+      const g = Math.round((1 - val) * 245);
+      const bg = val > 0.5 ? `rgba(255,${g},80,${0.3+val*0.6})` :
+                 val > 0.2 ? `rgba(245,166,35,${0.2+val*0.6})` :
+                 `rgba(0,245,160,${0.1+val*0.4})`;
+      const tooltip = `${agentId} h${h}: ${(val*100).toFixed(1)}% hall`;
+      html += `<div class="heatmap-cell" style="background:${bg}" data-tooltip="${tooltip}"></div>`;
+    });
+  });
+  
+  grid.innerHTML = html;
+  
+  // Hallucination type chart
+  if (hallTypeChart) { hallTypeChart.destroy(); hallTypeChart = null; }
+  
+  const typeLabels = Object.keys(typeData);
+  const typeVals = Object.values(typeData);
+  
+  if (typeLabels.length) {
+    const ctx = document.getElementById('hall-type-chart').getContext('2d');
+    hallTypeChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: typeLabels,
+        datasets: [{
+          data: typeVals,
+          backgroundColor: ['#ff4757','#f5a623','#00d4ff','#b89aff'],
+          borderWidth: 0,
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: { color: '#8ba0c0', font: { size: 10, family: 'Inter' }, boxWidth: 12 }
+          }
+        }
+      }
+    });
+  }
+}
+
+// ── DRIFT FINGERPRINTS ─────────────────────────────────────────────────────────
+function renderDrift(driftData) {
+  const list = document.getElementById('drift-list');
+  if (!driftData || !driftData.length) {
+    list.innerHTML = '<div style="color:var(--text2);font-size:12px;">No agents tracked yet</div>';
+    return;
+  }
+  
+  list.innerHTML = driftData.map(d => {
+    const driftPct = (d.fingerprint_drift * 100).toFixed(1);
+    const driftClass = d.drift_status === 'critical' ? 'drift-critical' :
+                       d.drift_status === 'warning' ? 'drift-warning' : 'drift-nominal';
+    const fp = d.fingerprint_current || [];
+    
+    return `
+      <div class="fingerprint-row">
+        <div class="fp-name">${d.agent_id}</div>
+        <svg class="fp-radar" viewBox="-30 -30 60 60">${makeRadar(fp, agentColor(d.agent_id))}</svg>
+        <div class="fp-drift">
+          <div class="fp-drift-bar">
+            <div class="fp-drift-fill ${driftClass}" style="width:${Math.min(driftPct,100)}%"></div>
+          </div>
+          <div class="fp-drift-label">${driftPct}% drift · ${d.drift_status}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function makeRadar(fp, color) {
+  if (!fp || fp.length < 8) return '';
+  const dims = fp.length;
+  const r = 22;
+  const points = fp.map((v, i) => {
+    const angle = (i / dims) * Math.PI * 2 - Math.PI / 2;
+    const rv = v * r;
+    return `${(Math.cos(angle) * rv).toFixed(1)},${(Math.sin(angle) * rv).toFixed(1)}`;
+  });
+  
+  // Axis lines
+  const axes = fp.map((_, i) => {
+    const angle = (i / dims) * Math.PI * 2 - Math.PI / 2;
+    return `<line x1="0" y1="0" x2="${(Math.cos(angle)*r).toFixed(1)}" y2="${(Math.sin(angle)*r).toFixed(1)}" stroke="#2a3f6a" stroke-width="0.5"/>`;
+  }).join('');
+  
+  return `${axes}<polygon points="${points.join(' ')}" fill="${color}20" stroke="${color}" stroke-width="1.5"/>`;
+}
+
+// ── NETWORK GRAPH ─────────────────────────────────────────────────────────────
+let d3svg = null;
+let simulation = null;
+let d3nodes = [];
+let d3links = [];
+let activeCallCount = 0;
+
+function renderNetworkGraph() {
+  const svg = d3.select('#network-svg');
+  svg.selectAll('*').remove();
+  
+  const W = document.getElementById('network-svg').clientWidth || 600;
+  const H = 320;
+  
+  // Build nodes for all known agents
+  const allAgents = [...new Set([...KNOWN_AGENTS, ...Object.keys(agents)])];
+  
+  d3nodes = allAgents.map(id => ({
+    id,
+    calls: (agents[id] || {}).call_count || 0,
+    status: (agents[id] || {}).drift_status || (agents[id] ? 'nominal' : 'offline'),
+  }));
+  
+  // Watson in center, others around it
+  const watsonNode = d3nodes.find(n => n.id === 'watson');
+  if (watsonNode) { watsonNode.fx = W/2; watsonNode.fy = H/2; }
+  
+  // Links: all subagents connect to watson
+  d3links = d3nodes
+    .filter(n => n.id !== 'watson')
+    .map(n => ({ source: n.id, target: 'watson', id: `${n.id}-watson` }));
+  
+  const linkEl = svg.append('g').selectAll('.link')
+    .data(d3links)
+    .enter().append('line')
+    .attr('class', 'link')
+    .attr('id', d => 'link-' + d.id);
+  
+  // Pulse overlay lines
+  const pulseEl = svg.append('g').selectAll('.link-pulse')
+    .data(d3links)
+    .enter().append('line')
+    .attr('class', 'link-pulse')
+    .attr('id', d => 'pulse-' + d.id);
+  
+  const nodeEl = svg.append('g').selectAll('.node')
+    .data(d3nodes)
+    .enter().append('g')
+    .attr('class', 'node')
+    .call(d3.drag()
+      .on('start', (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+      .on('drag', (e, d) => { d.fx=e.x; d.fy=e.y; })
+      .on('end', (e, d) => { if (!e.active) simulation.alphaTarget(0); if (d.id !== 'watson') { d.fx=null; d.fy=null; } })
+    );
+  
+  nodeEl.append('circle')
+    .attr('r', d => d.id === 'watson' ? 22 : 14)
+    .attr('fill', d => agentColor(d.id) + '22')
+    .attr('stroke', d => agentColor(d.id))
+    .attr('stroke-width', d => d.id === 'watson' ? 3 : 2);
+  
+  nodeEl.append('text')
+    .attr('dy', '0.35em')
+    .attr('text-anchor', 'middle')
+    .attr('fill', d => agentColor(d.id))
+    .attr('font-size', d => d.id === 'watson' ? 11 : 9)
+    .attr('font-weight', d => d.id === 'watson' ? 700 : 500)
+    .text(d => d.id === 'watson' ? 'Watson' : d.id.split('-')[0]);
+  
+  // Calls badge
+  nodeEl.append('text')
+    .attr('dy', d => (d.id === 'watson' ? 22 : 14) + 12)
+    .attr('text-anchor', 'middle')
+    .attr('fill', '#8ba0c0')
+    .attr('font-size', 8)
+    .attr('class', d => 'node-calls-' + d.id)
+    .text(d => agents[d.id] ? agents[d.id].call_count + 'c' : '');
+  
+  simulation = d3.forceSimulation(d3nodes)
+    .force('link', d3.forceLink(d3links).id(d => d.id).distance(100).strength(0.5))
+    .force('charge', d3.forceManyBody().strength(-300))
+    .force('center', d3.forceCenter(W/2, H/2))
+    .force('collision', d3.forceCollide(30))
+    .on('tick', () => {
+      linkEl
+        .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+      pulseEl
+        .attr('x1', d => d.source.x).attr('y1', d => d.source.y)
+        .attr('x2', d => d.target.x).attr('y2', d => d.target.y);
+      nodeEl.attr('transform', d => `translate(${d.x},${d.y})`);
+    });
+  
+  d3svg = svg;
+}
+
+function pulseNetworkEdge(fromAgent, toAgent) {
+  const key = `${fromAgent}-${toAgent}`;
+  const pulseEl = d3.select(`#pulse-${key}`);
+  if (pulseEl.empty()) return;
+  
+  activeCallCount++;
+  document.getElementById('network-badge').textContent = activeCallCount + ' edges fired';
+  
+  pulseEl
+    .attr('stroke', agentColor(fromAgent))
+    .attr('opacity', 0.9)
+    .transition().duration(600).attr('opacity', 0);
+  
+  // Highlight node
+  d3.select('#network-svg').selectAll('.node')
+    .filter(d => d.id === fromAgent)
+    .select('circle')
+    .transition().duration(200).attr('r', 20)
+    .transition().duration(400).attr('r', 14);
+}
+
+// ── FETCH AND RENDER ──────────────────────────────────────────────────────────
+async function fetchAndRenderAll() {
+  try {
+    const [stats, costs, drift] = await Promise.all([
+      fetch(BASE_URL + '/api/stats').then(r => r.json()),
+      fetch(BASE_URL + '/api/costs').then(r => r.json()),
+      fetch(BASE_URL + '/api/drift').then(r => r.json()),
+    ]);
+    
+    renderCosts(costs);
+    renderHeatmap(stats.heatmap || {}, stats.hallucination_types || {});
+    renderDrift(drift);
+    
+    document.getElementById('stat-calls').textContent = (stats.total_calls || 0).toLocaleString();
+    document.getElementById('stat-agents').textContent = stats.total_agents || 0;
+  } catch(e) {
+    console.warn('Fetch failed:', e);
+  }
+}
+
+// ── PERIODIC REFRESH ──────────────────────────────────────────────────────────
+setInterval(fetchAndRenderAll, 15000);
+setInterval(renderAgentList, 5000);
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  // Prime with known agents
+  KNOWN_AGENTS.forEach(id => {
+    if (!agents[id]) agents[id] = { id, call_count: 0, drift_status: 'offline' };
+  });
+  
+  renderAgentList();
+  renderNetworkGraph();
+  connectWS();
+  
+  // First fetch after a short delay
+  setTimeout(fetchAndRenderAll, 1500);
+});
+
+// Handle resize
+window.addEventListener('resize', () => {
+  renderNetworkGraph();
+});
+</script>
+</body>
+</html>
