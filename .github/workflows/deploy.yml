@@ -8,7 +8,7 @@ env:
   PROJECT_ID: apex-internal-apps
   SERVICE_NAME: apex-governance
   REGION: us-central1
-  IMAGE: gcr.io/apex-internal-apps/apex-governance
+  IMAGE: us-central1-docker.pkg.dev/apex-internal-apps/workflow-assistant/apex-governance
 
 jobs:
   build-and-deploy:
@@ -30,14 +30,44 @@ jobs:
       - name: Configure Docker for GCR
         run: gcloud auth configure-docker --quiet
 
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+
       - name: Build and Push via Cloud Build
         run: |
-          gcloud builds submit . \
-            --tag $IMAGE:${{ github.sha }} \
-            --project $PROJECT_ID \
-            --quiet
+          # Use adlan-deployer SA which has AR write access
+          cat > /tmp/cloudbuild.json << EOF
+          {
+            "source": {"gitSource": {"url": "https://github.com/Skobyn/apex-governance.git", "revision": "${{ github.sha }}"}},
+            "serviceAccount": "projects/apex-internal-apps/serviceAccounts/adlan-deployer@apex-internal-apps.iam.gserviceaccount.com",
+            "steps": [
+              {"name": "gcr.io/cloud-builders/docker", "args": ["build", "-t", "${IMAGE}:${{ github.sha }}", "-t", "${IMAGE}:latest", "."]},
+              {"name": "gcr.io/cloud-builders/docker", "args": ["push", "--all-tags", "${IMAGE}"]}
+            ],
+            "images": ["${IMAGE}:${{ github.sha }}", "${IMAGE}:latest"],
+            "options": {"logging": "CLOUD_LOGGING_ONLY"}
+          }
+          EOF
           
-          gcloud container images add-tag $IMAGE:${{ github.sha }} $IMAGE:latest --quiet
+          BUILD_ID=$(gcloud builds submit --no-source \
+            --config /tmp/cloudbuild.json \
+            --project $PROJECT_ID \
+            --format='value(id)' 2>/dev/null || \
+            curl -s -X POST "https://cloudbuild.googleapis.com/v1/projects/$PROJECT_ID/builds" \
+              -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+              -H "Content-Type: application/json" \
+              -d @/tmp/cloudbuild.json | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('metadata',{}).get('build',{}).get('id',''))")
+          
+          echo "Build ID: $BUILD_ID"
+          
+          # Wait for build
+          for i in $(seq 1 40); do
+            STATUS=$(gcloud builds describe $BUILD_ID --project $PROJECT_ID --format='value(status)' 2>/dev/null)
+            echo "Build status: $STATUS"
+            if [[ "$STATUS" == "SUCCESS" ]]; then break; fi
+            if [[ "$STATUS" == "FAILURE" || "$STATUS" == "CANCELLED" ]]; then exit 1; fi
+            sleep 15
+          done
 
       - name: Deploy to Cloud Run
         run: |
